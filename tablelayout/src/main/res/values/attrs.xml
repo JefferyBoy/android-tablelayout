@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="TableLayout">
+        <attr name="android:columnCount" format="integer" />
+        <attr name="android:rowCount" format="integer" />
+        <attr name="android:strokeWidth" format="dimension" />
+        <attr name="android:color" format="color" />
+    </declare-styleable>
+
+    <declare-styleable name="TableLayout_Layout">
+        <attr name="android:layout_row" format="integer" />
+        <attr name="android:layout_column" format="integer" />
+        <attr name="android:layout_columnSpan" format="integer" min="1" />
+        <attr name="android:layout_rowSpan" format="integer" min="1" />
+        <attr name="android:layout_gravity" />
+    </declare-styleable>
+
+</resources>
