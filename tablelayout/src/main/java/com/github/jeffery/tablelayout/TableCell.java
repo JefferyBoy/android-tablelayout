@@ -1,6 +1,7 @@
 package com.github.jeffery.tablelayout;
 
 import android.view.Gravity;
+import android.view.View;
 
 import java.io.Serializable;
 import java.util.Objects;
@@ -9,12 +10,13 @@ import java.util.Objects;
  * @author mxlei
  * @date 2022/5/19
  */
-public class TableCell implements Serializable {
+public final class TableCell implements Serializable{
     private int row;
     private int col;
     private int rowSpan = 1;
     private int colSpan = 1;
     private int gravity = Gravity.CENTER;
+    private transient View view;
     private transient boolean selected = false;
 
     public TableCell(){
@@ -25,6 +27,7 @@ public class TableCell implements Serializable {
         this.row = row;
         this.col = col;
     }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -88,5 +91,13 @@ public class TableCell implements Serializable {
 
     public void setSelected(boolean selected) {
         this.selected = selected;
+    }
+
+    public View getView() {
+        return view;
+    }
+
+    public void setView(View view) {
+        this.view = view;
     }
 }

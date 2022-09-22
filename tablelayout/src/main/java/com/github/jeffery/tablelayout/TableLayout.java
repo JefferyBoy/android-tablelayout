@@ -4,24 +4,29 @@ import android.content.Context;
 import android.content.res.TypedArray;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.DashPathEffect;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
-import android.graphics.Rect;
 import android.util.AttributeSet;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.FrameLayout;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.view.GestureDetectorCompat;
 
+import com.github.jeffery.tablelayout.R;
+
 import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.Iterator;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author mxlei
@@ -61,11 +66,8 @@ public class TableLayout extends ViewGroup {
     /**
      * 当前获取焦点的单元格
      */
-    private final TableCell mFocusedCell = new TableCell(-1, -1);
-    /**
-     * 多选模式下选择的单元格
-     */
-    private final Set<TableCell> mSelectedCell = new HashSet<>();
+    private TableCell mFocusedCell = null;
+
     /**
      * 当前焦点单元格背景色
      */
@@ -78,12 +80,9 @@ public class TableLayout extends ViewGroup {
      * 是否处于多选模式
      */
     private boolean mMultiSelectMode = false;
-    /**
-     * 自定义的单元格属性
-     */
-    private final Set<TableCell> customCellList = new HashSet<>();
+    private boolean mConsumeTouchEvent = true;
 
-    private final List<TableCell> cellList = new ArrayList<>();
+    private final Map<String, TableCell> cellData = new ConcurrentHashMap<>();
     private final GestureDetectorCompat gestureDetectorCompat;
     private OnItemClickListener mOnItemClickListener;
     private OnItemClickListener mOnItemDoubleClickListener;
@@ -117,76 +116,42 @@ public class TableLayout extends ViewGroup {
         mFocusedCellBackgroundPaint.setStyle(Paint.Style.FILL);
         TableGestureListener gestureListener = new TableGestureListener() {
 
-            private int[] calTableCell(MotionEvent e) {
+            private TableCell calTableCell(MotionEvent e) {
                 int column = (int) (e.getX() / (mDefaultColumnWidth + mBorderWidth));
                 int row = (int) (e.getY() / (mDefaultRowHeight + mBorderWidth));
+                TableCell eventCell = null;
                 //判断触摸点是否在合并单元格区间
-                for (TableCell cell : customCellList) {
+                for (TableCell cell : cellData.values()) {
                     if (row >= cell.getRow()
                             && row < cell.getRow() + cell.getRowSpan()
                             && column >= cell.getCol()
                             && column < cell.getCol() + cell.getColSpan()
                     ) {
-                        row = cell.getRow();
-                        column = cell.getCol();
+                        eventCell = cell;
+                        break;
                     }
                 }
-                return new int[]{row, column};
+                return eventCell == null ? new TableCell(row, column) : eventCell;
             }
+
 
             @Override
             public boolean onSingleTapUp(MotionEvent e) {
-                int[] rc = calTableCell(e);
-                int row = rc[0];
-                int column = rc[1];
-                TableCell cell = null;
+                TableCell cell = calTableCell(e);
+                int row = cell.getRow();
+                int column = cell.getCol();
                 if (mMultiSelectMode) {
-                    for (TableCell c : mSelectedCell) {
-                        if (c.getRow() == row && c.getCol() == column) {
-                            cell = c;
-                            break;
-                        }
-                    }
-                    if (cell == null) {
-                        for (TableCell c : customCellList) {
-                            if (c.getRow() == row && c.getCol() == column) {
-                                cell = c;
-                                break;
-                            }
-                        }
-                        if (cell == null) {
-                            cell = new TableCell(row, column);
-                            mFocusedCell.setRowSpan(1);
-                            mFocusedCell.setColSpan(1);
-                        } else {
-                            mFocusedCell.setRowSpan(cell.getRowSpan());
-                            mFocusedCell.setColSpan(cell.getColSpan());
-                        }
-                        mSelectedCell.add(cell);
-                    } else {
-                        mSelectedCell.remove(cell);
-                    }
-                } else {
-                    for (TableCell c : customCellList) {
-                        if (c.getRow() == row && c.getCol() == column) {
-                            cell = c;
-                            break;
-                        }
-                    }
-                    if (cell == null) {
-                        mFocusedCell.setRowSpan(1);
-                        mFocusedCell.setColSpan(1);
-                    } else {
-                        mFocusedCell.setRowSpan(cell.getRowSpan());
-                        mFocusedCell.setColSpan(cell.getColSpan());
+                    cell.setSelected(!cell.isSelected());
+                    if (cell.isSelected()) {
+                        cellData.put(genCellMapKey(row, column), cell);
+                    } else if (isDefaultCellLayoutParam(cell)) {
+                        cellData.remove(cell);
                     }
                 }
-                mFocusedCell.setRow(row);
-                mFocusedCell.setCol(column);
+                mFocusedCell = cell;
                 invalidate();
                 if (mOnItemClickListener != null) {
-                    View c = getChildAt(row, column);
-                    return mOnItemClickListener.onItemClick(c, mFocusedCell);
+                    return mOnItemClickListener.onItemClick(mFocusedCell);
                 }
                 return super.onSingleTapUp(e);
             }
@@ -194,12 +159,11 @@ public class TableLayout extends ViewGroup {
             @Override
             public boolean onDoubleTap(MotionEvent e) {
                 if (mOnItemDoubleClickListener != null) {
-                    int[] rc = calTableCell(e);
-                    int row = rc[0];
-                    int column = rc[1];
-                    if (row == mFocusedCell.getRow() && column == mFocusedCell.getCol()) {
-                        View c = getChildAt(row, column);
-                        return mOnItemDoubleClickListener.onItemClick(c, mFocusedCell);
+                    TableCell cell = calTableCell(e);
+                    int row = cell.getRow();
+                    int column = cell.getCol();
+                    if (mFocusedCell != null && row == mFocusedCell.getRow() && column == mFocusedCell.getCol()) {
+                        return mOnItemDoubleClickListener.onItemClick(mFocusedCell);
                     }
                 }
                 return super.onDoubleTap(e);
@@ -211,18 +175,8 @@ public class TableLayout extends ViewGroup {
         initAttributes(context, attrs, defStyleAttr, defStyleRes);
     }
 
-    @Override
-    protected void onFocusChanged(boolean gainFocus, int direction, @Nullable Rect previouslyFocusedRect) {
-        super.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
-        if (!gainFocus) {
-            mFocusedCell.setRow(-1);
-            mFocusedCell.setCol(-1);
-            invalidate();
-        }
-    }
-
     public interface OnItemClickListener {
-        boolean onItemClick(@Nullable View view, TableCell cell);
+        boolean onItemClick(TableCell cell);
     }
 
     public static class LayoutParams extends ViewGroup.LayoutParams {
@@ -371,9 +325,9 @@ public class TableLayout extends ViewGroup {
 
     @Override
     protected void onLayout(boolean changed, int l, int t, int r, int b) {
-        for (int i = 0, N = getChildCount(); i < N; i++) {
-            View c = getChildAt(i);
-            if (c.getVisibility() == View.GONE) {
+        for (TableCell cell : cellData.values()) {
+            View c = cell.getView();
+            if (c == null || c.getVisibility() == View.GONE) {
                 continue;
             }
             LayoutParams lp = (LayoutParams) c.getLayoutParams();
@@ -384,6 +338,10 @@ public class TableLayout extends ViewGroup {
             int cellHeight = lp.rowSpan * mDefaultRowHeight;
             int measuredWidth = c.getMeasuredWidth();
             int measuredHeight = c.getMeasuredHeight();
+            c.setLeft(x);
+            c.setTop(y);
+            c.setRight(x + cellWidth);
+            c.setBottom(y + cellHeight);
 
             final int layoutDirection = getLayoutDirection();
             final int absoluteGravity = Gravity.getAbsoluteGravity(gravity, layoutDirection);
@@ -407,24 +365,23 @@ public class TableLayout extends ViewGroup {
         }
     }
 
-    @Nullable
-    public View getChildAt(int row, int column) {
-        if (row < 0 || column < 0) {
-            return null;
-        }
-        for (int i = 0, n = getChildCount(); i < n; i++) {
-            View c = getChildAt(i);
-            LayoutParams lp = (LayoutParams) c.getLayoutParams();
-            if (lp.row == row && lp.column == column) {
-                return c;
-            }
-        }
-        return null;
-    }
 
     @Override
     protected ViewGroup.LayoutParams generateDefaultLayoutParams() {
         return new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+    }
+
+    private LayoutParams generateLayoutParams(TableCell cell) {
+        if (cell == null) {
+            return (LayoutParams) generateDefaultLayoutParams();
+        }
+        LayoutParams lp = (LayoutParams) generateDefaultLayoutParams();
+        lp.row = cell.getRow();
+        lp.column = cell.getCol();
+        lp.rowSpan = cell.getRowSpan();
+        lp.columnSpan = cell.getColSpan();
+        lp.gravity = cell.getGravity();
+        return lp;
     }
 
     @Override
@@ -463,24 +420,26 @@ public class TableLayout extends ViewGroup {
         //绘制边缘边框
         canvas.drawRoundRect(offset, offset, width - offset, height - offset, 0f, 0f, mBorderPaint);
         //清除合并单元格的内边框
-        for (TableCell cell : customCellList) {
+        for (TableCell cell : cellData.values()) {
             if (cell.getRowSpan() > 1 || cell.getColSpan() > 1) {
                 int left = cell.getCol() * colW + mBorderWidth;
                 int top = cell.getRow() * rowH + mBorderWidth;
-                if (left < width - mBorderWidth && top < height - mBorderWidth) {
-                    canvas.drawRect(left, top,
-                            Math.min(left + cell.getColSpan() * colW - mBorderWidth, width - mBorderWidth),
-                            Math.min(top + cell.getRowSpan() * rowH - mBorderWidth, height - mBorderWidth), mBorderPaintClear
-                    );
+                if (cell.getRowSpan() > 1 || cell.getColSpan() > 1) {
+                    if (left < width - mBorderWidth && top < height - mBorderWidth) {
+                        canvas.drawRect(left, top,
+                                Math.min(left + cell.getColSpan() * colW - mBorderWidth, width - mBorderWidth),
+                                Math.min(top + cell.getRowSpan() * rowH - mBorderWidth, height - mBorderWidth), mBorderPaintClear
+                        );
+                    }
                 }
             }
         }
         if (mMultiSelectMode) {
             //绘制当前选中的单元格颜色
-            for (TableCell cell : mSelectedCell) {
+            for (TableCell cell : cellData.values()) {
                 int left = cell.getCol() * colW + mBorderWidth;
                 int top = cell.getRow() * rowH + mBorderWidth;
-                if (left < width - mBorderWidth && top < height - mBorderWidth) {
+                if (cell.isSelected() && left < width - mBorderWidth && top < height - mBorderWidth) {
                     canvas.drawRect(left, top,
                             left + cell.getColSpan() * colW - mBorderWidth,
                             top + cell.getRowSpan() * rowH - mBorderWidth, mFocusedCellBackgroundPaint);
@@ -488,7 +447,7 @@ public class TableLayout extends ViewGroup {
             }
         } else {
             //绘制当前焦点的单元格颜色
-            if (mFocusedCell.getRow() >= 0 && mFocusedCell.getCol() >= 0) {
+            if (mFocusedCell != null && mFocusedCell.getRow() >= 0 && mFocusedCell.getCol() >= 0) {
                 int left = mFocusedCell.getCol() * colW + mBorderWidth;
                 int top = mFocusedCell.getRow() * rowH + mBorderWidth;
                 if (left < width - mBorderWidth && top < height - mBorderWidth) {
@@ -500,10 +459,110 @@ public class TableLayout extends ViewGroup {
         }
     }
 
+    public void addView(@NonNull View child, @NonNull TableCell cell) {
+        LayoutParams lp = generateLayoutParams(cell);
+        addView(child, -1, lp);
+    }
+
+    @Override
+    public void addView(@NonNull View child, int index, @Nullable ViewGroup.LayoutParams params) {
+        LayoutParams lp = (LayoutParams) params;
+        if (!checkLayoutParams(params)) {
+            lp = (LayoutParams) generateDefaultLayoutParams();
+        }
+        String key = genCellMapKey(lp.row, lp.column);
+        TableCell cell = cellData.get(key);
+        if (cell != null) {
+            View v = cell.getView();
+            if (v != null && v != child) {
+                removeView(v);
+                cell.setView(child);
+            }
+        }
+        super.addView(child, index, params);
+    }
+
+    public void removeViewAt(@Nullable TableCell cell) {
+        if (cell != null) {
+            View v = cell.getView();
+            if (v != null) {
+                removeView(v);
+            }
+        }
+    }
+
+    public void removeViewAt(int row, int column) {
+        View v = getChildAt(row, column);
+        if (v != null) {
+            removeView(v);
+        }
+    }
+
+    @Override
+    public void onViewAdded(View child) {
+        super.onViewAdded(child);
+        LayoutParams lp = (LayoutParams) child.getLayoutParams();
+        String key = genCellMapKey(lp.row, lp.column);
+        TableCell cell = new TableCell(lp.row, lp.column);
+        cell.setGravity(lp.gravity);
+        cell.setRowSpan(lp.rowSpan);
+        cell.setColSpan(lp.columnSpan);
+        cell.setView(child);
+        cellData.put(key, cell);
+    }
+
+    @Override
+    public void onViewRemoved(View child) {
+        super.onViewRemoved(child);
+        LayoutParams lp = (LayoutParams) child.getLayoutParams();
+        String key = genCellMapKey(lp.row, lp.column);
+        TableCell cell = cellData.get(key);
+        if (cell != null) {
+            cell.setView(null);
+            if (isDefaultCellLayoutParam(cell)) {
+                cellData.remove(key);
+            }
+        }
+    }
+
+
+    @Nullable
+    public View getChildAt(int row, int column) {
+        if (row < 0 || column < 0) {
+            return null;
+        }
+        TableCell cell = cellData.get(genCellMapKey(row, column));
+        if (cell != null) {
+            return cell.getView();
+        }
+        return null;
+    }
+
+    @Nullable
+    public View getChildAt(@NonNull TableCell cell) {
+        return getChildAt(cell.getRow(), cell.getCol());
+    }
+
+    public void setTableCellData(Collection<TableCell> cells) {
+        cellData.clear();
+        removeAllViews();
+        if (cells != null && cells.size() > 0) {
+            for (TableCell cell : cells) {
+                if (!isDefaultCellLayoutParam(cell)) {
+                    cellData.put(genCellMapKey(cell.getRow(), cell.getCol()), cell);
+                }
+                if(cell.getView() != null){
+                    addView(cell.getView(), cell);
+                }
+            }
+        }
+        requestLayout();
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         gestureDetectorCompat.onTouchEvent(event);
-        return true;
+        return mConsumeTouchEvent;
     }
 
     @Override
@@ -512,6 +571,20 @@ public class TableLayout extends ViewGroup {
         if (getLayerType() == LAYER_TYPE_SOFTWARE) {
             invalidate();
         }
+    }
+
+
+    private boolean isDefaultCellLayoutParam(TableCell cell) {
+        return cell != null &&
+                cell.getView() == null &&
+                cell.getRowSpan() == 1 &&
+                cell.getColSpan() == 1 &&
+                cell.getGravity() == Gravity.CENTER &&
+                !cell.isSelected();
+    }
+
+    public void setConsumeTouchEvent(boolean consume) {
+        this.mConsumeTouchEvent = consume;
     }
 
     /**
@@ -599,6 +672,18 @@ public class TableLayout extends ViewGroup {
     }
 
     /**
+     * 设置边框虚线格式
+     */
+    public void setBorderDashPathEffect(float[] intervals) {
+        if (intervals != null && intervals.length > 0) {
+            mBorderPaint.setPathEffect(new DashPathEffect(intervals, 0));
+        } else {
+            mBorderPaint.setPathEffect(null);
+        }
+        invalidate();
+    }
+
+    /**
      * 设置单击格子监听
      */
     public void setOnItemClickListener(OnItemClickListener onItemClickListener) {
@@ -620,10 +705,19 @@ public class TableLayout extends ViewGroup {
     public void setMultiSelectMode(boolean multiSelectMode) {
         if (this.mMultiSelectMode != multiSelectMode) {
             this.mMultiSelectMode = multiSelectMode;
-            mSelectedCell.clear();
             if (multiSelectMode) {
-                if (mFocusedCell.getRow() >= 0 && mFocusedCell.getCol() >= 0) {
-                    mSelectedCell.add(new TableCell(mFocusedCell.getRow(), mFocusedCell.getCol()));
+                if (mFocusedCell != null) {
+                    mFocusedCell.setSelected(true);
+                    cellData.put(genCellMapKey(mFocusedCell.getRow(), mFocusedCell.getCol()), mFocusedCell);
+                }
+            } else {
+                Set<String> keySet = cellData.keySet();
+                for (String key : keySet) {
+                    TableCell cell = cellData.get(key);
+                    cell.setSelected(false);
+                    if (isDefaultCellLayoutParam(cell)) {
+                        cellData.remove(key);
+                    }
                 }
             }
             invalidate();
@@ -641,130 +735,186 @@ public class TableLayout extends ViewGroup {
      * 清除已选中的单元格
      */
     public void clearFocusedCell() {
-        mFocusedCell.setRow(-1);
-        mFocusedCell.setCol(-1);
-        mSelectedCell.clear();
+        mFocusedCell = null;
+        Set<String> keySet = cellData.keySet();
+        for (String key : keySet) {
+            TableCell cell = cellData.get(key);
+            cell.setSelected(false);
+            if (isDefaultCellLayoutParam(cell)) {
+                cellData.remove(cell);
+            }
+        }
         invalidate();
     }
 
-    public boolean isCellSelected(TableCell cell) {
-        return mSelectedCell.contains(cell);
-    }
 
-    public void clearSelectedCell() {
-        if (!mSelectedCell.isEmpty()) {
-            mSelectedCell.clear();
-            invalidate();
+    public List<TableCell> getSelectedCells() {
+        List<TableCell> result = new ArrayList<>();
+        for (TableCell cell : cellData.values()) {
+            if (cell.isSelected()) {
+                result.add(cell);
+            }
         }
+        return result;
     }
 
-    public Set<TableCell> getSelectedCells(){
-        return mSelectedCell;
+    public List<TableCell> getTableCellData() {
+        return new ArrayList<>(cellData.values());
+    }
+
+    public void combineCell(TableCell cell) {
+        if(cell != null){
+            List<TableCell> list = new ArrayList<>();
+            list.add(cell);
+            combineCell(list);
+        }
     }
 
     /**
-     * 合并单元格，根据选中的单元格进行合并
+     * 合并单元格
      *
-     * @param combine 是否合并单元格
+     * @param cells 需要合并的格子列表
      */
-    public void combineCell(boolean combine) {
-        if (combine) {
-            if (mSelectedCell.size() <= 1) {
-                return;
+    public void combineCell(Collection<TableCell> cells) {
+        if (cells == null || cells.size() == 0) {
+            return;
+        }
+        for (TableCell cell : cells) {
+            cell.setSelected(false);
+        }
+        int minRow = 0, maxRow = 0, minCol = 0, maxCol = 0;
+        int idx = 0;
+        if (cells.size() <= 1) {
+            return;
+        }
+        for (TableCell cell : cells) {
+            if (idx++ == 0) {
+                minRow = cell.getRow();
+                maxRow = minRow;
+                minCol = cell.getCol();
+                maxCol = minCol;
             }
-            int minRow = 0, maxRow = 0, minCol = 0, maxCol = 0;
-            int idx = 0;
-            for (TableCell cell : mSelectedCell) {
-                if (idx++ == 0) {
-                    minRow = cell.getRow();
-                    maxRow = minRow;
-                    minCol = cell.getCol();
-                    maxCol = minCol;
+            minRow = Math.min(minRow, cell.getRow());
+            maxRow = Math.max(maxRow, cell.getRow());
+            minCol = Math.min(minCol, cell.getCol());
+            maxCol = Math.max(maxCol, cell.getCol());
+        }
+        if (minRow == maxRow && minCol == maxCol) {
+            return;
+        }
+        TableCell cell = cellData.get(genCellMapKey(minRow, minCol));
+        if (cell == null) {
+            cell = new TableCell(minRow, minCol);
+            cellData.put(genCellMapKey(cell.getRow(), cell.getCol()), cell);
+        }
+        //删除合并单元格后被合并的项
+        Set<String> keySet = cellData.keySet();
+        cellData.keySet().iterator();
+        for (String key : keySet) {
+            TableCell c = cellData.get(key);
+            if (!c.equals(cell) && isDefaultCellLayoutParam(c)) {
+                cellData.remove(key);
+            }
+        }
+        //左上的格子行列进行扩展
+        cell.setColSpan(maxCol - minCol + 1);
+        cell.setRowSpan(maxRow - minRow + 1);
+        //左上的格子view布局更新
+        View child = cell.getView();
+        if (child != null) {
+            LayoutParams lp = (LayoutParams) child.getLayoutParams();
+            lp.rowSpan = cell.getRowSpan();
+            lp.columnSpan = cell.getColSpan();
+        }
+        //被合并的格子view不显示
+        for (int r = cell.getRow(); r < cell.getRow() + cell.getRowSpan(); r++) {
+            for (int c = cell.getCol(); c < cell.getCol() + cell.getColSpan(); c++) {
+                if (r == cell.getRow() && c == cell.getCol()) {
+                    continue;
                 }
-                minRow = Math.min(minRow, cell.getRow());
-                maxRow = Math.max(maxRow, cell.getRow());
-                minCol = Math.min(minCol, cell.getCol());
-                maxCol = Math.max(maxCol, cell.getCol());
-            }
-            TableCell cell = null;
-            for (TableCell c : customCellList) {
-                if (c.getRow() == minRow && c.getCol() == minCol) {
-                    cell = c;
-                    break;
-                }
-            }
-            if (cell == null) {
-                cell = new TableCell(minRow, minCol);
-                customCellList.add(cell);
-            }
-            //删除合并单元格后被合并的项
-            Iterator<TableCell> iterator = customCellList.iterator();
-            while (iterator.hasNext()) {
-                TableCell c = iterator.next();
-                if (c.getRow() > minRow && c.getRow() <= maxRow && c.getCol() > minCol && c.getCol() <= maxCol) {
-                    iterator.remove();
-                }
-            }
-            //左上的格子行列进行扩展
-            cell.setColSpan(maxCol - minCol + 1);
-            cell.setRowSpan(maxRow - minRow + 1);
-            //子view布局属性同步更新
-            View child = getChildAt(cell.getRow(), cell.getCol());
-            if (child != null) {
-                LayoutParams lp = (LayoutParams) child.getLayoutParams();
-                lp.rowSpan = cell.getRowSpan();
-                lp.columnSpan = cell.getColSpan();
-            }
-            //被合并的格子view不显示
-            for (int r = cell.getRow() + 1; r < cell.getRow() + cell.getRowSpan(); r++) {
-                for (int c = cell.getCol() + 1; c < cell.getCol() + cell.getColSpan(); c++) {
-                    child = getChildAt(r, c);
-                    if (child != null) {
-                        child.setVisibility(View.GONE);
-                    }
-                }
-            }
-        } else {
-            Iterator<TableCell> iterator = customCellList.iterator();
-            while (iterator.hasNext()) {
-                TableCell cell = iterator.next();
-                if (cell.getRow() == mFocusedCell.getRow() && cell.getCol() == mFocusedCell.getCol()) {
-                    iterator.remove();
-                    //子view布局属性更新
-                    View child = getChildAt(cell.getRow(), cell.getCol());
-                    if (child != null) {
-                        LayoutParams lp = (LayoutParams) child.getLayoutParams();
-                        lp.rowSpan = 1;
-                        lp.columnSpan = 1;
-                    }
-                }
-            }
-            //被合并的格子view可以显示
-            TableCell cell = mFocusedCell;
-            for (int r = cell.getRow() + 1; r < cell.getRow() + cell.getRowSpan(); r++) {
-                for (int c = cell.getCol() + 1; c < cell.getCol() + cell.getColSpan(); c++) {
-                    View child = getChildAt(r, c);
-                    if (child != null) {
-                        child.setVisibility(View.VISIBLE);
-                    }
+                child = getChildAt(r, c);
+                if (child != null) {
+                    child.setVisibility(View.GONE);
                 }
             }
         }
-        mFocusedCell.setRow(-1);
-        mFocusedCell.setCol(-1);
-        mFocusedCell.setColSpan(1);
-        mFocusedCell.setRowSpan(1);
-        mSelectedCell.clear();
+        mFocusedCell = null;
         requestLayout();
     }
 
+    public void unCombineCell(TableCell cell){
+        if(cell != null){
+            List<TableCell> list = new ArrayList<>();
+            list.add(cell);
+            unCombineCell(list);
+        }
+    }
+    /**
+     * 取消合并单元格
+     *
+     * @param cells 需要合并的格子列表
+     */
+    public void unCombineCell(Collection<TableCell> cells) {
+        if (cells == null || cells.size() == 0) {
+            return;
+        }
+        for (TableCell cell : cells) {
+            cell.setSelected(false);
+        }
+        for (TableCell cell : cells) {
+            if (cell.getRowSpan() > 1 || cell.getColSpan() > 1) {
+                //被合并的格子view可以显示
+                View child = null;
+                for (int r = cell.getRow(); r < cell.getRow() + cell.getRowSpan(); r++) {
+                    for (int c = cell.getCol(); c < cell.getCol() + cell.getColSpan(); c++) {
+                        if (r == cell.getRow() && c == cell.getCol()) {
+                            continue;
+                        }
+                        child = getChildAt(r, c);
+                        if (child != null) {
+                            child.setVisibility(View.VISIBLE);
+                        }
+                    }
+                }
+                cell.setRowSpan(1);
+                cell.setColSpan(1);
+                //子view布局属性更新
+                child = cell.getView();
+                if (child != null) {
+                    LayoutParams lp = (LayoutParams) child.getLayoutParams();
+                    lp.rowSpan = 1;
+                    lp.columnSpan = 1;
+
+                }
+            }
+        }
+        mFocusedCell = null;
+        requestLayout();
+    }
+
+    /**
+     * 获取当前焦点的格子
+     */
+    @Nullable
+    public TableCell getFocusedCell() {
+        return mFocusedCell;
+    }
 
     /**
      * 设置格子内对齐方式
      */
     public void setCellGravity(TableCell cell, int gravity) {
         cell.setGravity(gravity);
-        View child = getChildAt(cell.getRow(), cell.getCol());
+        if (gravity != Gravity.CENTER) {
+            cellData.put(genCellMapKey(cell.getRow(), cell.getCol()), cell);
+        } else {
+            String key = genCellMapKey(cell.getRow(), cell.getCol());
+            TableCell cell1 = cellData.get(key);
+            if (isDefaultCellLayoutParam(cell1)) {
+                cellData.remove(key);
+            }
+        }
+        View child = cell.getView();
         if (child != null) {
             LayoutParams lp = (LayoutParams) child.getLayoutParams();
             if (lp.getGravity() != gravity) {
@@ -786,5 +936,13 @@ public class TableLayout extends ViewGroup {
             return lp.getGravity();
         }
         return Gravity.CENTER;
+    }
+
+    private String genCellMapKey(int row, int col) {
+        return row + "," + col;
+    }
+
+    private String genCellMapKey(TableCell cell) {
+        return cell.getRow() + "," + cell.getCol();
     }
 }

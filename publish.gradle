@@ -4,13 +4,13 @@ def localProperties = new Properties()
 localProperties.load(rootProject.file("local.properties").newDataInputStream())
 
 // debug仓库
-def SNAPSHOT_REPOSITORY_URL = localProperties.get("mavenRepoRelease")
+def SNAPSHOT_REPOSITORY_URL = localProperties.get("mavenRepoSnapshot")
 // release仓库
-def RELEASE_REPOSITORY_URL = localProperties.get("mavenRepoSnapshots")
+def RELEASE_REPOSITORY_URL = localProperties.get("mavenRepoRelease")
 // maven 账户
 def REPOSITORY_USER_NAME = localProperties.get("mavenUserName")
 def REPOSITORY_USER_PSW = localProperties.get("mavenPassword")
-def POM_GROUP_ID = 'com.gainscha'
+def POM_GROUP_ID = project.group.toString()
 def POM_ARTIFACT_ID = project.name.startsWith("sdk-") ? project.name.substring(4) : project.name
 def VERSION_NAME = project.version.toString()
 def POM_NAME = POM_ARTIFACT_ID

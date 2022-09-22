@@ -1,4 +1,4 @@
-package com.github.jeffery.tablelayout;
+package com.github.jeffery.app;
 
 import org.junit.Test;
 

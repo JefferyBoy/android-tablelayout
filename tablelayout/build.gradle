@@ -2,7 +2,7 @@ plugins {
     id 'com.android.library'
 }
 
-group("com.github.jeffery.tablelayout")
+group("com.github.jeffery")
 version("0.1-SNAPSHOT")
 description("Table layout for android")
 apply from: "../publish.gradle"
