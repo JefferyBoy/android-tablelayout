@@ -3,7 +3,7 @@ plugins {
 }
 
 group("com.github.jeffery")
-version("0.1-SNAPSHOT")
+version("0.2")
 description("Table layout for android")
 apply from: "../publish.gradle"
 
